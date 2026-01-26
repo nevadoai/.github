@@ -1,0 +1,78 @@
+name: Auto Approve After AI Review (Reusable)
+
+# Reusable workflow for AI-assisted auto-approval
+# Called by individual repos to enable Copilot-based auto-approval
+#
+# Setup:
+# 1. Add org secrets: TYLER_APPROVE_PAT and JOSH_APPROVE_PAT
+# 2. In each repo, create a workflow that calls this one
+
+on:
+  workflow_call:
+    secrets:
+      TYLER_APPROVE_PAT:
+        required: true
+        description: "Tyler's PAT for approving Josh's PRs"
+      JOSH_APPROVE_PAT:
+        required: true
+        description: "Josh's PAT for approving Tyler's PRs"
+
+jobs:
+  auto-approve:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Check if Copilot found issues
+        id: check-review
+        run: |
+          # Get the review body from the event
+          REVIEW_BODY='${{ github.event.review.body }}'
+          
+          # Check if Copilot generated any comments/concerns
+          # Copilot says "generated no comments" when everything looks good
+          if echo "$REVIEW_BODY" | grep -q "generated no comments"; then
+            echo "copilot_approved=true" >> $GITHUB_OUTPUT
+          else
+            echo "copilot_approved=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Determine which token to use
+        id: select-token
+        if: steps.check-review.outputs.copilot_approved == 'true'
+        run: |
+          PR_AUTHOR="${{ github.event.pull_request.user.login }}"
+          echo "PR author: $PR_AUTHOR"
+          
+          # Use the OTHER person's token to approve
+          if [[ "$PR_AUTHOR" == "tydanielson" ]]; then
+            echo "use_token=josh" >> $GITHUB_OUTPUT
+          elif [[ "$PR_AUTHOR" == "josh-nevadoai" ]]; then
+            echo "use_token=tyler" >> $GITHUB_OUTPUT
+          else
+            # For other contributors (dependabot, etc), use Josh's token
+            echo "use_token=josh" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Auto-approve with Josh's token
+        if: steps.check-review.outputs.copilot_approved == 'true' && steps.select-token.outputs.use_token == 'josh'
+        uses: hmarr/auto-approve-action@v4
+        with:
+          github-token: ${{ secrets.JOSH_APPROVE_PAT }}
+
+      - name: Auto-approve with Tyler's token
+        if: steps.check-review.outputs.copilot_approved == 'true' && steps.select-token.outputs.use_token == 'tyler'
+        uses: hmarr/auto-approve-action@v4
+        with:
+          github-token: ${{ secrets.TYLER_APPROVE_PAT }}
+
+      - name: Comment if manual review needed
+        if: steps.check-review.outputs.copilot_approved == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '⚠️ Copilot found potential issues in this PR. Manual review required before merge.'
+            })
