@@ -19,8 +19,9 @@ name: Policy as Code - OPA/Conftest (Reusable)
 #   policy-check:
 #     uses: nevadoai/.github/.github/workflows/policy-as-code.yml@v1.0.0
 #     with:
-#       config-directory: './terraform'  # Directory to scan
-#       # Org SOC2 policies are used automatically by default
+#       config-directory: './terraform'   # Directory to scan
+#       policy-directory: './policies'    # Optional: repo-specific Rego policies (in addition to org SOC2 policies)
+#       # Org SOC2 policies are used automatically by default; set use-org-policies: false to disable them
 #
 # See: https://www.conftest.dev/ for policy writing guide
 
