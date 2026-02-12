@@ -66,6 +66,9 @@ jobs:
     name: tfsec - Terraform Security Scanner
     runs-on: ubuntu-latest
     if: ${{ !inputs.skip-tfsec }}
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -96,6 +99,9 @@ jobs:
     name: Checkov - Multi-Cloud IaC Scanner
     runs-on: ubuntu-latest
     if: ${{ !inputs.skip-checkov }}
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -127,6 +133,9 @@ jobs:
   trivy-iac:
     name: Trivy IaC Scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -151,6 +160,8 @@ jobs:
     name: CloudFormation Linter
     runs-on: ubuntu-latest
     if: ${{ !inputs.skip-cfn-lint }}
+    permissions:
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -197,6 +208,8 @@ jobs:
   terraform-validate:
     name: Terraform Validation
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

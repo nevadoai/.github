@@ -19,6 +19,16 @@ uses: nevadoai/.github/.github/workflows/golang-security-scan.yml@main
 
 **Current Version:** `v1.0.0` ([Release Notes](https://github.com/nevadoai/.github/releases/tag/v1.0.0))
 
+### Permissions
+
+**All reusable workflows declare their own permissions following the principle of least privilege.** You don't need to grant any permissions in your calling workflow - the reusable workflows request only what they need:
+
+- `contents: read` - To checkout code
+- `security-events: write` - To upload SARIF results to GitHub Security tab (only jobs that need it)
+- `pull-requests: write` - For dependency review comments on PRs (only dependency-review jobs)
+
+This is more secure than granting broad permissions at the workflow level.
+
 ## Reusable Workflows
 
 ### Auto-Approve After AI Review
