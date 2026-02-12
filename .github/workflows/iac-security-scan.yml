@@ -12,11 +12,13 @@ name: IaC Security & Vulnerability Scan (Reusable)
 # Usage in your repo:
 # Create .github/workflows/security-scan.yml:
 #
+# IMPORTANT: Use version tags (@v1.0.0) or commit SHAs, never @main
+#
 # name: Security Scan
 # on: [push, pull_request]
 # jobs:
 #   iac-scan:
-#     uses: nevadoai/.github/.github/workflows/iac-security-scan.yml@main
+#     uses: nevadoai/.github/.github/workflows/iac-security-scan.yml@v1.0.0
 #     with:
 #       working-directory: './terraform'  # Optional
 
