@@ -17,7 +17,7 @@ uses: nevadoai/.github/.github/workflows/golang-security-scan.yml@d12758d
 uses: nevadoai/.github/.github/workflows/golang-security-scan.yml@main
 ```
 
-**Current Version:** `v1.0.0` ([Release Notes](https://github.com/nevadoai/.github/releases/tag/v1.0.0))
+**Latest Release:** See [the latest release](https://github.com/nevadoai/.github/releases/latest). For a stable major version, use a tag like `@v1`; for strict pinning, use an explicit version like `@v1.0.0`.
 
 ### Permissions
 
