@@ -1,0 +1,237 @@
+name: IaC Security & Vulnerability Scan (Reusable)
+
+# Reusable workflow for Infrastructure as Code security and vulnerability scanning
+# Supports Terraform, CloudFormation, and other IaC formats
+#
+# Features:
+# - tfsec: Terraform static analysis
+# - checkov: Multi-cloud IaC security scanner (Terraform, CloudFormation, etc.)
+# - trivy: Comprehensive IaC vulnerability scanner
+# - cfn-lint: CloudFormation linting and validation
+#
+# Usage in your repo:
+# Create .github/workflows/security-scan.yml:
+#
+# name: Security Scan
+# on: [push, pull_request]
+# jobs:
+#   iac-scan:
+#     uses: nevadoai/.github/.github/workflows/iac-security-scan.yml@main
+#     with:
+#       working-directory: './terraform'  # Optional
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: 'Working directory for IaC files'
+        required: false
+        type: string
+        default: '.'
+      terraform-directory:
+        description: 'Directory containing Terraform files (if different from working-directory)'
+        required: false
+        type: string
+        default: ''
+      cloudformation-directory:
+        description: 'Directory containing CloudFormation templates (if different from working-directory)'
+        required: false
+        type: string
+        default: ''
+      severity:
+        description: 'Minimum severity level to report (LOW, MEDIUM, HIGH, CRITICAL)'
+        required: false
+        type: string
+        default: 'MEDIUM'
+      skip-tfsec:
+        description: 'Skip tfsec scanning'
+        required: false
+        type: boolean
+        default: false
+      skip-checkov:
+        description: 'Skip checkov scanning'
+        required: false
+        type: boolean
+        default: false
+      skip-cfn-lint:
+        description: 'Skip CloudFormation linting'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  tfsec:
+    name: tfsec - Terraform Security Scanner
+    runs-on: ubuntu-latest
+    if: ${{ !inputs.skip-tfsec }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine Terraform directory
+        id: terraform-dir
+        run: |
+          if [ -n "${{ inputs.terraform-directory }}" ]; then
+            echo "dir=${{ inputs.terraform-directory }}" >> $GITHUB_OUTPUT
+          else
+            echo "dir=${{ inputs.working-directory }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run tfsec
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: ${{ steps.terraform-dir.outputs.dir }}
+          format: sarif
+          soft_fail: true
+
+      - name: Upload tfsec results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: results.sarif
+
+  checkov:
+    name: Checkov - Multi-Cloud IaC Scanner
+    runs-on: ubuntu-latest
+    if: ${{ !inputs.skip-checkov }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Checkov
+        run: pip install checkov
+
+      - name: Run Checkov
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          checkov --directory . \
+            --output sarif \
+            --output-file-path . \
+            --soft-fail \
+            --compact \
+            --framework terraform cloudformation arm kubernetes helm dockerfile secrets
+
+      - name: Upload Checkov results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: ${{ inputs.working-directory }}/results_sarif.sarif
+
+  trivy-iac:
+    name: Trivy IaC Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy IaC scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          scan-ref: ${{ inputs.working-directory }}
+          format: 'sarif'
+          output: 'trivy-iac-results.sarif'
+          severity: ${{ inputs.severity }}
+          scanners: 'config,secret'
+
+      - name: Upload Trivy results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-iac-results.sarif'
+
+  cfn-lint:
+    name: CloudFormation Linter
+    runs-on: ubuntu-latest
+    if: ${{ !inputs.skip-cfn-lint }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install cfn-lint
+        run: pip install cfn-lint
+
+      - name: Determine CloudFormation directory
+        id: cfn-dir
+        run: |
+          if [ -n "${{ inputs.cloudformation-directory }}" ]; then
+            echo "dir=${{ inputs.cloudformation-directory }}" >> $GITHUB_OUTPUT
+          else
+            echo "dir=${{ inputs.working-directory }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check for CloudFormation templates
+        id: check-cfn
+        run: |
+          if find "${{ steps.cfn-dir.outputs.dir }}" -type f \( -name "*.template" -o -name "*.json" -o -name "*.yaml" -o -name "*.yml" \) | grep -q .; then
+            echo "has_templates=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_templates=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run cfn-lint
+        if: steps.check-cfn.outputs.has_templates == 'true'
+        working-directory: ${{ steps.cfn-dir.outputs.dir }}
+        run: |
+          cfn-lint **/*.template **/*.yaml **/*.yml **/*.json --format sarif > cfn-lint-results.sarif || true
+
+      - name: Upload cfn-lint results
+        if: steps.check-cfn.outputs.has_templates == 'true' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cfn-lint-results
+          path: ${{ steps.cfn-dir.outputs.dir }}/cfn-lint-results.sarif
+
+  terraform-validate:
+    name: Terraform Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine Terraform directory
+        id: terraform-dir
+        run: |
+          if [ -n "${{ inputs.terraform-directory }}" ]; then
+            echo "dir=${{ inputs.terraform-directory }}" >> $GITHUB_OUTPUT
+          else
+            echo "dir=${{ inputs.working-directory }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check for Terraform files
+        id: check-tf
+        run: |
+          if find "${{ steps.terraform-dir.outputs.dir }}" -type f -name "*.tf" | grep -q .; then
+            echo "has_terraform=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_terraform=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Terraform
+        if: steps.check-tf.outputs.has_terraform == 'true'
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform fmt check
+        if: steps.check-tf.outputs.has_terraform == 'true'
+        working-directory: ${{ steps.terraform-dir.outputs.dir }}
+        run: terraform fmt -check -recursive || true
+
+      - name: Terraform init
+        if: steps.check-tf.outputs.has_terraform == 'true'
+        working-directory: ${{ steps.terraform-dir.outputs.dir }}
+        run: terraform init -backend=false
+
+      - name: Terraform validate
+        if: steps.check-tf.outputs.has_terraform == 'true'
+        working-directory: ${{ steps.terraform-dir.outputs.dir }}
+        run: terraform validate

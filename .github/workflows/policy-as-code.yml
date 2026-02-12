@@ -1,0 +1,286 @@
+name: Policy as Code - OPA/Conftest (Reusable)
+
+# Reusable workflow for policy as code enforcement using OPA/Conftest
+# Test and enforce policies on infrastructure code and configurations
+#
+# Features:
+# - Conftest: Test configuration files using Open Policy Agent (OPA)
+# - Support for Terraform, Kubernetes, Dockerfiles, and more
+# - Custom policy enforcement
+#
+# Usage in your repo:
+# Create .github/workflows/policy-check.yml:
+#
+# name: Policy Check
+# on: [push, pull_request]
+# jobs:
+#   policy-check:
+#     uses: nevadoai/.github/.github/workflows/policy-as-code.yml@main
+#     with:
+#       policy-directory: './policies'  # Directory containing .rego policy files
+#       config-directory: './terraform'  # Directory to scan
+#
+# Policy files should be Rego files (.rego) in the policy directory.
+# See: https://www.conftest.dev/ for policy writing guide
+
+on:
+  workflow_call:
+    inputs:
+      conftest-version:
+        description: 'Conftest version to use'
+        required: false
+        type: string
+        default: '0.55.0'
+      policy-directory:
+        description: 'Directory containing Rego policy files (leave empty to use org policies)'
+        required: false
+        type: string
+        default: ''
+      config-directory:
+        description: 'Directory containing configuration files to test'
+        required: false
+        type: string
+        default: '.'
+      namespaces:
+        description: 'Comma-separated list of policy namespaces to test (e.g., main,terraform,kubernetes)'
+        required: false
+        type: string
+        default: 'main'
+      fail-on-warn:
+        description: 'Fail the build on warnings'
+        required: false
+        type: boolean
+        default: false
+      file-patterns:
+        description: 'File patterns to test (space-separated glob patterns)'
+        required: false
+        type: string
+        default: ''
+      use-org-policies:
+        description: 'Use centralized org policies from nevadoai/.github (default: true)'
+        required: false
+        type: boolean
+        default: true
+      policy-repo-ref:
+        description: 'Branch or tag to use for org policies'
+        required: false
+        type: string
+        default: 'main'
+
+jobs:
+  conftest-terraform:
+    name: Conftest - Terraform Policies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Checkout org policies
+        if: inputs.use-org-policies && inputs.policy-directory == ''
+        uses: actions/checkout@v4
+        with:
+          repository: nevadoai/.github
+          ref: ${{ inputs.policy-repo-ref }}
+          path: .conftest-policies
+
+      - name: Download Conftest
+        run: |
+          wget https://github.com/open-policy-agent/conftest/releases/download/v${{ inputs.conftest-version }}/conftest_${{ inputs.conftest-version }}_Linux_x86_64.tar.gz
+          tar xzf conftest_${{ inputs.conftest-version }}_Linux_x86_64.tar.gz
+          sudo mv conftest /usr/local/bin/
+          conftest --version
+
+      - name: Check for Terraform files
+        id: check-tf
+        run: |
+          if find "${{ inputs.config-directory }}" -type f -name "*.tf" | grep -q .; then
+            echo "has_terraform=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_terraform=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Determine policy location
+        id: policy-location
+        run: |
+          if [ -n "${{ inputs.policy-directory }}" ]; then
+            echo "policy_path=${{ inputs.policy-directory }}" >> $GITHUB_OUTPUT
+          elif [ "${{ inputs.use-org-policies }}" == "true" ]; then
+            echo "policy_path=.conftest-policies/policies" >> $GITHUB_OUTPUT
+          else
+            echo "policy_path=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run Conftest on Terraform files
+        if: steps.check-tf.outputs.has_terraform == 'true' && steps.policy-location.outputs.policy_path != ''
+        working-directory: ${{ inputs.config-directory }}
+        run: |
+          POLICY_ARG="--policy ../${{ steps.policy-location.outputs.policy_path }}"
+
+          FAIL_ON_WARN=""
+          if [ "${{ inputs.fail-on-warn }}" == "true" ]; then
+            FAIL_ON_WARN="--fail-on-warn"
+          fi
+
+          conftest test *.tf $POLICY_ARG $FAIL_ON_WARN --namespace terraform || true
+
+  conftest-kubernetes:
+    name: Conftest - Kubernetes Policies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Checkout org policies
+        if: inputs.use-org-policies && inputs.policy-directory == ''
+        uses: actions/checkout@v4
+        with:
+          repository: nevadoai/.github
+          ref: ${{ inputs.policy-repo-ref }}
+          path: .conftest-policies
+
+      - name: Download Conftest
+        run: |
+          wget https://github.com/open-policy-agent/conftest/releases/download/v${{ inputs.conftest-version }}/conftest_${{ inputs.conftest-version }}_Linux_x86_64.tar.gz
+          tar xzf conftest_${{ inputs.conftest-version }}_Linux_x86_64.tar.gz
+          sudo mv conftest /usr/local/bin/
+
+      - name: Check for Kubernetes manifests
+        id: check-k8s
+        run: |
+          if find "${{ inputs.config-directory }}" -type f \( -name "*.yaml" -o -name "*.yml" \) -exec grep -l "kind:" {} \; | grep -q .; then
+            echo "has_k8s=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_k8s=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Determine policy location
+        id: policy-location
+        run: |
+          if [ -n "${{ inputs.policy-directory }}" ]; then
+            echo "policy_path=${{ inputs.policy-directory }}" >> $GITHUB_OUTPUT
+          elif [ "${{ inputs.use-org-policies }}" == "true" ]; then
+            echo "policy_path=.conftest-policies/policies" >> $GITHUB_OUTPUT
+          else
+            echo "policy_path=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run Conftest on Kubernetes manifests
+        if: steps.check-k8s.outputs.has_k8s == 'true' && steps.policy-location.outputs.policy_path != ''
+        working-directory: ${{ inputs.config-directory }}
+        run: |
+          POLICY_ARG="--policy ../${{ steps.policy-location.outputs.policy_path }}"
+
+          FAIL_ON_WARN=""
+          if [ "${{ inputs.fail-on-warn }}" == "true" ]; then
+            FAIL_ON_WARN="--fail-on-warn"
+          fi
+
+          find . -type f \( -name "*.yaml" -o -name "*.yml" \) -exec grep -l "kind:" {} \; | xargs -r conftest test $POLICY_ARG $FAIL_ON_WARN --namespace kubernetes || true
+
+  conftest-dockerfile:
+    name: Conftest - Dockerfile Policies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Checkout org policies
+        if: inputs.use-org-policies && inputs.policy-directory == ''
+        uses: actions/checkout@v4
+        with:
+          repository: nevadoai/.github
+          ref: ${{ inputs.policy-repo-ref }}
+          path: .conftest-policies
+
+      - name: Download Conftest
+        run: |
+          wget https://github.com/open-policy-agent/conftest/releases/download/v${{ inputs.conftest-version }}/conftest_${{ inputs.conftest-version }}_Linux_x86_64.tar.gz
+          tar xzf conftest_${{ inputs.conftest-version }}_Linux_x86_64.tar.gz
+          sudo mv conftest /usr/local/bin/
+
+      - name: Check for Dockerfiles
+        id: check-docker
+        run: |
+          if find "${{ inputs.config-directory }}" -type f \( -name "Dockerfile*" -o -name "*.dockerfile" \) | grep -q .; then
+            echo "has_dockerfiles=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_dockerfiles=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Determine policy location
+        id: policy-location
+        run: |
+          if [ -n "${{ inputs.policy-directory }}" ]; then
+            echo "policy_path=${{ inputs.policy-directory }}" >> $GITHUB_OUTPUT
+          elif [ "${{ inputs.use-org-policies }}" == "true" ]; then
+            echo "policy_path=.conftest-policies/policies" >> $GITHUB_OUTPUT
+          else
+            echo "policy_path=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run Conftest on Dockerfiles
+        if: steps.check-docker.outputs.has_dockerfiles == 'true' && steps.policy-location.outputs.policy_path != ''
+        working-directory: ${{ inputs.config-directory }}
+        run: |
+          POLICY_ARG="--policy ../${{ steps.policy-location.outputs.policy_path }}"
+
+          FAIL_ON_WARN=""
+          if [ "${{ inputs.fail-on-warn }}" == "true" ]; then
+            FAIL_ON_WARN="--fail-on-warn"
+          fi
+
+          find . -type f \( -name "Dockerfile*" -o -name "*.dockerfile" \) | xargs -r conftest test $POLICY_ARG $FAIL_ON_WARN --namespace docker || true
+
+  conftest-custom:
+    name: Conftest - Custom File Patterns
+    runs-on: ubuntu-latest
+    if: inputs.file-patterns != ''
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Checkout org policies
+        if: inputs.use-org-policies && inputs.policy-directory == ''
+        uses: actions/checkout@v4
+        with:
+          repository: nevadoai/.github
+          ref: ${{ inputs.policy-repo-ref }}
+          path: .conftest-policies
+
+      - name: Download Conftest
+        run: |
+          wget https://github.com/open-policy-agent/conftest/releases/download/v${{ inputs.conftest-version }}/conftest_${{ inputs.conftest-version }}_Linux_x86_64.tar.gz
+          tar xzf conftest_${{ inputs.conftest-version }}_Linux_x86_64.tar.gz
+          sudo mv conftest /usr/local/bin/
+
+      - name: Determine policy location
+        id: policy-location
+        run: |
+          if [ -n "${{ inputs.policy-directory }}" ]; then
+            echo "policy_path=${{ inputs.policy-directory }}" >> $GITHUB_OUTPUT
+          elif [ "${{ inputs.use-org-policies }}" == "true" ]; then
+            echo "policy_path=.conftest-policies/policies" >> $GITHUB_OUTPUT
+          else
+            echo "policy_path=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run Conftest on custom patterns
+        if: steps.policy-location.outputs.policy_path != ''
+        working-directory: ${{ inputs.config-directory }}
+        run: |
+          POLICY_ARG="--policy ../${{ steps.policy-location.outputs.policy_path }}"
+
+          FAIL_ON_WARN=""
+          if [ "${{ inputs.fail-on-warn }}" == "true" ]; then
+            FAIL_ON_WARN="--fail-on-warn"
+          fi
+
+          NAMESPACES=""
+          IFS=',' read -ra NS_ARRAY <<< "${{ inputs.namespaces }}"
+          for ns in "${NS_ARRAY[@]}"; do
+            NAMESPACES="$NAMESPACES --namespace $ns"
+          done
+
+          for pattern in ${{ inputs.file-patterns }}; do
+            conftest test $pattern $POLICY_ARG $FAIL_ON_WARN $NAMESPACES || true
+          done

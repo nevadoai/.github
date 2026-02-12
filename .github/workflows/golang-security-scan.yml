@@ -1,0 +1,114 @@
+name: Golang Security & Vulnerability Scan (Reusable)
+
+# Reusable workflow for Golang security and vulnerability scanning
+# Called by individual repos to scan Go code for vulnerabilities and security issues
+#
+# Features:
+# - govulncheck: Official Go vulnerability scanner
+# - gosec: Security checker for Go code patterns
+# - trivy: Comprehensive vulnerability scanner
+#
+# Usage in your repo:
+# Create .github/workflows/security-scan.yml:
+#
+# name: Security Scan
+# on: [push, pull_request]
+# jobs:
+#   golang-scan:
+#     uses: nevadoai/.github/.github/workflows/golang-security-scan.yml@main
+#     with:
+#       go-version: '1.21'  # Optional, defaults to '1.21'
+#       working-directory: '.'  # Optional, defaults to '.'
+
+on:
+  workflow_call:
+    inputs:
+      go-version:
+        description: 'Go version to use'
+        required: false
+        type: string
+        default: '1.21'
+      working-directory:
+        description: 'Working directory for Go project'
+        required: false
+        type: string
+        default: '.'
+      severity:
+        description: 'Minimum severity level to report (LOW, MEDIUM, HIGH, CRITICAL)'
+        required: false
+        type: string
+        default: 'MEDIUM'
+
+jobs:
+  govulncheck:
+    name: Go Vulnerability Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ inputs.go-version }}
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck
+        working-directory: ${{ inputs.working-directory }}
+        run: govulncheck ./...
+
+  gosec:
+    name: Go Security Checker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run gosec
+        uses: securego/gosec@master
+        with:
+          args: '-fmt sarif -out gosec-results.sarif ${{ inputs.working-directory }}/...'
+
+      - name: Upload gosec results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: gosec-results.sarif
+
+  trivy-fs:
+    name: Trivy Filesystem Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner in fs mode
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: ${{ inputs.working-directory }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: ${{ inputs.severity }}
+          scanners: 'vuln,secret,misconfig'
+
+      - name: Upload Trivy results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: ${{ inputs.severity == 'CRITICAL' && 'critical' || inputs.severity == 'HIGH' && 'high' || inputs.severity == 'MEDIUM' && 'moderate' || 'low' }}

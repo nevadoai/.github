@@ -1,0 +1,178 @@
+name: Node.js Security & Vulnerability Scan (Reusable)
+
+# Reusable workflow for Node.js security and vulnerability scanning
+# Works with all Node.js projects: React apps, Express APIs, Lambda functions, etc.
+# Called by individual repos to scan JavaScript/TypeScript code for vulnerabilities
+#
+# Features:
+# - npm/yarn/pnpm audit: Built-in dependency vulnerability scanning
+# - trivy: Comprehensive vulnerability scanner
+# - retire.js: Detects vulnerable JavaScript libraries
+#
+# Usage in your repo:
+# Create .github/workflows/security-scan.yml:
+#
+# name: Security Scan
+# on: [push, pull_request]
+# jobs:
+#   nodejs-scan:
+#     uses: nevadoai/.github/.github/workflows/nodejs-security-scan.yml@main
+#     with:
+#       node-version: '20'  # Optional, defaults to '20'
+#       package-manager: 'npm'  # Optional: 'npm', 'yarn', or 'pnpm'
+#       working-directory: '.'  # Optional, for Lambda functions use './lambda' or specific function dir
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Node.js version to use'
+        required: false
+        type: string
+        default: '20'
+      working-directory:
+        description: 'Working directory for Node.js project'
+        required: false
+        type: string
+        default: '.'
+      package-manager:
+        description: 'Package manager to use (npm, yarn, or pnpm)'
+        required: false
+        type: string
+        default: 'npm'
+      severity:
+        description: 'Minimum severity level to report (LOW, MEDIUM, HIGH, CRITICAL)'
+        required: false
+        type: string
+        default: 'MEDIUM'
+      audit-level:
+        description: 'Audit level for npm/yarn (low, moderate, high, critical)'
+        required: false
+        type: string
+        default: 'moderate'
+
+jobs:
+  npm-audit:
+    name: NPM/Yarn Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Install dependencies (npm)
+        if: inputs.package-manager == 'npm'
+        working-directory: ${{ inputs.working-directory }}
+        run: npm ci || npm install
+
+      - name: Install dependencies (yarn)
+        if: inputs.package-manager == 'yarn'
+        working-directory: ${{ inputs.working-directory }}
+        run: yarn install --frozen-lockfile || yarn install
+
+      - name: Install dependencies (pnpm)
+        if: inputs.package-manager == 'pnpm'
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          npm install -g pnpm
+          pnpm install --frozen-lockfile || pnpm install
+
+      - name: Run npm audit
+        if: inputs.package-manager == 'npm'
+        working-directory: ${{ inputs.working-directory }}
+        run: npm audit --audit-level=${{ inputs.audit-level }} || true
+
+      - name: Run yarn audit
+        if: inputs.package-manager == 'yarn'
+        working-directory: ${{ inputs.working-directory }}
+        run: yarn audit --level ${{ inputs.audit-level }} || true
+
+      - name: Run pnpm audit
+        if: inputs.package-manager == 'pnpm'
+        working-directory: ${{ inputs.working-directory }}
+        run: pnpm audit --audit-level=${{ inputs.audit-level }} || true
+
+      - name: Generate audit report
+        if: always()
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          if [ "${{ inputs.package-manager }}" == "npm" ]; then
+            npm audit --json > npm-audit.json || true
+          elif [ "${{ inputs.package-manager }}" == "yarn" ]; then
+            yarn audit --json > yarn-audit.json || true
+          elif [ "${{ inputs.package-manager }}" == "pnpm" ]; then
+            pnpm audit --json > pnpm-audit.json || true
+          fi
+
+      - name: Upload audit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-results
+          path: ${{ inputs.working-directory }}/*-audit.json
+
+  trivy-fs:
+    name: Trivy Filesystem Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: ${{ inputs.working-directory }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: ${{ inputs.severity }}
+          scanners: 'vuln,secret,misconfig'
+
+      - name: Upload Trivy results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  retirejs:
+    name: Retire.js Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Install retire.js
+        run: npm install -g retire
+
+      - name: Run retire.js
+        working-directory: ${{ inputs.working-directory }}
+        run: retire --outputformat json --outputpath retire-results.json --severity ${{ inputs.audit-level }} || true
+
+      - name: Upload retire.js results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: retirejs-results
+          path: ${{ inputs.working-directory }}/retire-results.json
+
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: ${{ inputs.severity == 'CRITICAL' && 'critical' || inputs.severity == 'HIGH' && 'high' || inputs.severity == 'MEDIUM' && 'moderate' || 'low' }}
