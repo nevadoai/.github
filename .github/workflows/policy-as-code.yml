@@ -11,16 +11,18 @@ name: Policy as Code - OPA/Conftest (Reusable)
 # Usage in your repo:
 # Create .github/workflows/policy-check.yml:
 #
+# IMPORTANT: Use version tags (@v1.0.0) or commit SHAs, never @main
+#
 # name: Policy Check
 # on: [push, pull_request]
 # jobs:
 #   policy-check:
-#     uses: nevadoai/.github/.github/workflows/policy-as-code.yml@main
+#     uses: nevadoai/.github/.github/workflows/policy-as-code.yml@v1.0.0
 #     with:
-#       policy-directory: './policies'  # Directory containing .rego policy files
-#       config-directory: './terraform'  # Directory to scan
+#       config-directory: './terraform'   # Directory to scan
+#       policy-directory: './policies'    # Optional: repo-specific Rego policies (in addition to org SOC2 policies)
+#       # Org SOC2 policies are used automatically by default; set use-org-policies: false to disable them
 #
-# Policy files should be Rego files (.rego) in the policy directory.
 # See: https://www.conftest.dev/ for policy writing guide
 
 on:

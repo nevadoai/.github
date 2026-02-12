@@ -12,11 +12,13 @@ name: Node.js Security & Vulnerability Scan (Reusable)
 # Usage in your repo:
 # Create .github/workflows/security-scan.yml:
 #
+# IMPORTANT: Use version tags (@v1.0.0) or commit SHAs, never @main
+#
 # name: Security Scan
 # on: [push, pull_request]
 # jobs:
 #   nodejs-scan:
-#     uses: nevadoai/.github/.github/workflows/nodejs-security-scan.yml@main
+#     uses: nevadoai/.github/.github/workflows/nodejs-security-scan.yml@v1.0.0
 #     with:
 #       node-version: '20'  # Optional, defaults to '20'
 #       package-manager: 'npm'  # Optional: 'npm', 'yarn', or 'pnpm'
@@ -55,6 +57,8 @@ jobs:
   npm-audit:
     name: NPM/Yarn Audit
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -118,6 +122,9 @@ jobs:
   trivy-fs:
     name: Trivy Filesystem Scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -141,6 +148,8 @@ jobs:
   retirejs:
     name: Retire.js Vulnerability Scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -168,6 +177,9 @@ jobs:
     name: Dependency Review
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

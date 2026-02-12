@@ -2,6 +2,33 @@
 
 This repository contains organization-wide GitHub configurations and reusable workflows.
 
+## Versioning & Security
+
+**Important:** For supply chain security, always reference workflows using version tags or commit SHAs, never `@main`.
+
+```yaml
+# ✅ GOOD - Use version tag (recommended)
+uses: nevadoai/.github/.github/workflows/golang-security-scan.yml@v1.0.0
+
+# ✅ GOOD - Use commit SHA (most secure)
+uses: nevadoai/.github/.github/workflows/golang-security-scan.yml@d12758d
+
+# ❌ BAD - Don't use @main (supply chain risk)
+uses: nevadoai/.github/.github/workflows/golang-security-scan.yml@main
+```
+
+**Latest Release:** See [the latest release](https://github.com/nevadoai/.github/releases/latest). For a stable major version, use a tag like `@v1`; for strict pinning, use an explicit version like `@v1.0.0`.
+
+### Permissions
+
+**All reusable workflows declare their own permissions following the principle of least privilege.** In most cases, you don't need to set additional permissions in your calling workflow because the reusable workflows request only what they need. However, if your calling workflow or repository sets a restrictive `permissions` block (for example, read-only defaults), you must ensure that it still allows at least the permissions listed below:
+
+- `contents: read` - To checkout code
+- `security-events: write` - To upload SARIF results to GitHub Security tab (only jobs that need it)
+- `pull-requests: write` - For dependency review comments on PRs (only dependency-review jobs)
+
+This pattern is generally more secure than granting broad permissions at the workflow level.
+
 ## Reusable Workflows
 
 ### Auto-Approve After AI Review
@@ -28,7 +55,7 @@ on:
 jobs:
   auto-approve:
     if: github.event.review.user.login == 'copilot-pull-request-reviewer'
-    uses: nevadoai/.github/.github/workflows/auto-approve-after-ai-review.yml@main
+    uses: nevadoai/.github/.github/workflows/auto-approve-after-ai-review.yml@v1.0.0
     secrets: inherit
 ```
 
@@ -64,7 +91,7 @@ on:
 
 jobs:
   golang-scan:
-    uses: nevadoai/.github/.github/workflows/golang-security-scan.yml@main
+    uses: nevadoai/.github/.github/workflows/golang-security-scan.yml@v1.0.0
     with:
       go-version: '1.21'  # Optional, defaults to '1.21'
       working-directory: '.'  # Optional, defaults to '.'
@@ -103,7 +130,7 @@ on:
 
 jobs:
   nodejs-scan:
-    uses: nevadoai/.github/.github/workflows/nodejs-security-scan.yml@main
+    uses: nevadoai/.github/.github/workflows/nodejs-security-scan.yml@v1.0.0
     with:
       node-version: '20'  # Optional, defaults to '20'
       package-manager: 'npm'  # Optional: npm, yarn, or pnpm
@@ -119,7 +146,7 @@ Scan a specific Lambda function directory:
 ```yaml
 jobs:
   lambda-scan:
-    uses: nevadoai/.github/.github/workflows/nodejs-security-scan.yml@main
+    uses: nevadoai/.github/.github/workflows/nodejs-security-scan.yml@v1.0.0
     with:
       working-directory: './lambda/my-function'
       node-version: '20'
@@ -130,12 +157,12 @@ Or scan multiple Lambda functions:
 ```yaml
 jobs:
   auth-lambda:
-    uses: nevadoai/.github/.github/workflows/nodejs-security-scan.yml@main
+    uses: nevadoai/.github/.github/workflows/nodejs-security-scan.yml@v1.0.0
     with:
       working-directory: './lambda/auth'
 
   api-lambda:
-    uses: nevadoai/.github/.github/workflows/nodejs-security-scan.yml@main
+    uses: nevadoai/.github/.github/workflows/nodejs-security-scan.yml@v1.0.0
     with:
       working-directory: './lambda/api'
 ```
@@ -180,7 +207,7 @@ on:
 
 jobs:
   iac-scan:
-    uses: nevadoai/.github/.github/workflows/iac-security-scan.yml@main
+    uses: nevadoai/.github/.github/workflows/iac-security-scan.yml@v1.0.0
     with:
       working-directory: '.'  # Optional
       terraform-directory: './terraform'  # Optional
@@ -256,7 +283,7 @@ on:
 
 jobs:
   soc2-policy-check:
-    uses: nevadoai/.github/.github/workflows/policy-as-code.yml@main
+    uses: nevadoai/.github/.github/workflows/policy-as-code.yml@v1.0.0
     with:
       config-directory: './terraform'  # Directory containing your Terraform files
       # SOC2 org policies are used automatically by default
@@ -274,7 +301,7 @@ WARN - [DRATA] CloudTrail 'main' should send logs to CloudWatch Logs for Drata m
 ```yaml
 jobs:
   policy-check:
-    uses: nevadoai/.github/.github/workflows/policy-as-code.yml@main
+    uses: nevadoai/.github/.github/workflows/policy-as-code.yml@v1.0.0
     with:
       config-directory: './infrastructure'
       fail-on-warn: true  # Fail on warnings, not just errors
@@ -288,12 +315,12 @@ jobs:
 ```yaml
 jobs:
   terraform-policy:
-    uses: nevadoai/.github/.github/workflows/policy-as-code.yml@main
+    uses: nevadoai/.github/.github/workflows/policy-as-code.yml@v1.0.0
     with:
       config-directory: './terraform'
 
   k8s-policy:
-    uses: nevadoai/.github/.github/workflows/policy-as-code.yml@main
+    uses: nevadoai/.github/.github/workflows/policy-as-code.yml@v1.0.0
     with:
       config-directory: './k8s'
 ```
@@ -305,7 +332,7 @@ If you need additional project-specific policies, create `./policy/*.rego` files
 ```yaml
 jobs:
   policy-check:
-    uses: nevadoai/.github/.github/workflows/policy-as-code.yml@main
+    uses: nevadoai/.github/.github/workflows/policy-as-code.yml@v1.0.0
     with:
       policy-directory: './policy'  # Use local policies
       config-directory: './infrastructure'
@@ -372,22 +399,22 @@ on:
 
 jobs:
   golang-scan:
-    uses: nevadoai/.github/.github/workflows/golang-security-scan.yml@main
+    uses: nevadoai/.github/.github/workflows/golang-security-scan.yml@v1.0.0
     with:
       go-version: '1.21'
 
   nodejs-scan:
-    uses: nevadoai/.github/.github/workflows/nodejs-security-scan.yml@main
+    uses: nevadoai/.github/.github/workflows/nodejs-security-scan.yml@v1.0.0
     with:
       working-directory: './lambda'
 
   iac-scan:
-    uses: nevadoai/.github/.github/workflows/iac-security-scan.yml@main
+    uses: nevadoai/.github/.github/workflows/iac-security-scan.yml@v1.0.0
     with:
       terraform-directory: './infrastructure'
 
   policy-check:
-    uses: nevadoai/.github/.github/workflows/policy-as-code.yml@main
+    uses: nevadoai/.github/.github/workflows/policy-as-code.yml@v1.0.0
     with:
       config-directory: './infrastructure'
 ```
