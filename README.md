@@ -21,13 +21,13 @@ uses: nevadoai/.github/.github/workflows/golang-security-scan.yml@main
 
 ### Permissions
 
-**All reusable workflows declare their own permissions following the principle of least privilege.** You don't need to grant any permissions in your calling workflow - the reusable workflows request only what they need:
+**All reusable workflows declare their own permissions following the principle of least privilege.** In most cases, you don't need to set additional permissions in your calling workflow because the reusable workflows request only what they need. However, if your calling workflow or repository sets a restrictive `permissions` block (for example, read-only defaults), you must ensure that it still allows at least the permissions listed below:
 
 - `contents: read` - To checkout code
 - `security-events: write` - To upload SARIF results to GitHub Security tab (only jobs that need it)
 - `pull-requests: write` - For dependency review comments on PRs (only dependency-review jobs)
 
-This is more secure than granting broad permissions at the workflow level.
+This pattern is generally more secure than granting broad permissions at the workflow level.
 
 ## Reusable Workflows
 
