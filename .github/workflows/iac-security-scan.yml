@@ -4,7 +4,6 @@ name: IaC Security & Vulnerability Scan (Reusable)
 # Supports Terraform, CloudFormation, and other IaC formats
 #
 # Features:
-# - tfsec: Terraform static analysis
 # - checkov: Multi-cloud IaC security scanner (Terraform, CloudFormation, etc.)
 # - trivy: Comprehensive IaC vulnerability scanner
 # - cfn-lint: CloudFormation linting and validation
@@ -16,6 +15,9 @@ name: IaC Security & Vulnerability Scan (Reusable)
 #
 # name: Security Scan
 # on: [push, pull_request]
+# permissions:
+#   contents: read
+#   pull-requests: write  # Required for PR comments
 # jobs:
 #   iac-scan:
 #     uses: nevadoai/.github/.github/workflows/iac-security-scan.yml@v1.0.0
@@ -45,11 +47,6 @@ on:
         required: false
         type: string
         default: 'MEDIUM'
-      skip-tfsec:
-        description: 'Skip tfsec scanning'
-        required: false
-        type: boolean
-        default: false
       skip-checkov:
         description: 'Skip checkov scanning'
         required: false
@@ -62,46 +59,13 @@ on:
         default: false
 
 jobs:
-  tfsec:
-    name: tfsec - Terraform Security Scanner
-    runs-on: ubuntu-latest
-    if: ${{ !inputs.skip-tfsec }}
-    permissions:
-      contents: read
-      security-events: write
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Determine Terraform directory
-        id: terraform-dir
-        run: |
-          if [ -n "${{ inputs.terraform-directory }}" ]; then
-            echo "dir=${{ inputs.terraform-directory }}" >> $GITHUB_OUTPUT
-          else
-            echo "dir=${{ inputs.working-directory }}" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Run tfsec
-        uses: aquasecurity/tfsec-action@v1.0.3
-        with:
-          working_directory: ${{ steps.terraform-dir.outputs.dir }}
-          format: sarif
-          soft_fail: true
-
-      - name: Upload tfsec results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: results.sarif
-
   checkov:
     name: Checkov - Multi-Cloud IaC Scanner
     runs-on: ubuntu-latest
     if: ${{ !inputs.skip-checkov }}
     permissions:
       contents: read
-      security-events: write
+      pull-requests: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -115,46 +79,153 @@ jobs:
         run: pip install checkov
 
       - name: Run Checkov
+        id: checkov
         working-directory: ${{ inputs.working-directory }}
+        continue-on-error: true
         run: |
+          # Run Checkov and capture output
           checkov --directory . \
-            --output sarif \
-            --output-file-path . \
+            --output cli \
             --soft-fail \
             --compact \
-            --framework terraform cloudformation arm kubernetes helm dockerfile secrets
+            --framework terraform cloudformation arm kubernetes helm dockerfile secrets \
+            > checkov_output.txt 2>&1 || true
 
-      - name: Upload Checkov results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
+          # Check if there are any findings
+          if grep -q "Passed checks:" checkov_output.txt; then
+            echo "has_results=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_results=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload Checkov results as artifact
         if: always()
+        uses: actions/upload-artifact@v4
         with:
-          sarif_file: ${{ inputs.working-directory }}/results_sarif.sarif
+          name: checkov-results
+          path: ${{ inputs.working-directory }}/checkov_output.txt
+
+      - name: Find Pull Request
+        if: always() && steps.checkov.outputs.has_results == 'true'
+        uses: jwalton/gh-find-current-pr@v1
+        id: findPr
+
+      - name: Comment PR with Checkov Results
+        if: always() && steps.findPr.outputs.pr != '' && steps.checkov.outputs.has_results == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const checkovOutput = fs.readFileSync('${{ inputs.working-directory }}/checkov_output.txt', 'utf8');
+
+            // Truncate if too long (GitHub comment limit is ~65k characters)
+            let output = checkovOutput;
+            if (output.length > 60000) {
+              output = output.substring(0, 60000) + '\n\n... (output truncated)';
+            }
+
+            const body = `## Checkov Security Scan Results
+
+            <details><summary>View Checkov Findings</summary>
+
+            \`\`\`
+            ${output}
+            \`\`\`
+
+            </details>
+
+            **Commit:** ${{ github.sha }}`;
+
+            github.rest.issues.createComment({
+              issue_number: ${{ steps.findPr.outputs.pr }},
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
 
   trivy-iac:
     name: Trivy IaC Scan
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      security-events: write
+      pull-requests: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Run Trivy IaC scanner
+        id: trivy
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'config'
           scan-ref: ${{ inputs.working-directory }}
-          format: 'sarif'
-          output: 'trivy-iac-results.sarif'
+          format: 'table'
           severity: ${{ inputs.severity }}
           scanners: 'config,secret'
+          exit-code: '0'
 
-      - name: Upload Trivy results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
+      - name: Capture Trivy output
+        id: trivy-output
+        run: |
+          # Re-run Trivy to capture output to file
+          trivy config ${{ inputs.working-directory }} \
+            --format table \
+            --severity ${{ inputs.severity }} \
+            --scanners config,secret \
+            > trivy_output.txt 2>&1 || true
+
+          if [ -s trivy_output.txt ]; then
+            echo "has_results=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_results=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload Trivy results as artifact
         if: always()
+        uses: actions/upload-artifact@v4
         with:
-          sarif_file: 'trivy-iac-results.sarif'
+          name: trivy-results
+          path: trivy_output.txt
+
+      - name: Find Pull Request
+        if: always() && steps.trivy-output.outputs.has_results == 'true'
+        uses: jwalton/gh-find-current-pr@v1
+        id: findPr
+
+      - name: Comment PR with Trivy Results
+        if: always() && steps.findPr.outputs.pr != '' && steps.trivy-output.outputs.has_results == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const trivyOutput = fs.readFileSync('trivy_output.txt', 'utf8');
+
+            // Truncate if too long
+            let output = trivyOutput;
+            if (output.length > 60000) {
+              output = output.substring(0, 60000) + '\n\n... (output truncated)';
+            }
+
+            const body = `## Trivy IaC Security Scan Results
+
+            <details><summary>View Trivy Findings</summary>
+
+            \`\`\`
+            ${output}
+            \`\`\`
+
+            </details>
+
+            **Commit:** ${{ github.sha }}`;
+
+            github.rest.issues.createComment({
+              issue_number: ${{ steps.findPr.outputs.pr }},
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
 
   cfn-lint:
     name: CloudFormation Linter
@@ -162,6 +233,7 @@ jobs:
     if: ${{ !inputs.skip-cfn-lint }}
     permissions:
       contents: read
+      pull-requests: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -193,17 +265,64 @@ jobs:
           fi
 
       - name: Run cfn-lint
+        id: cfn-lint
         if: steps.check-cfn.outputs.has_templates == 'true'
         working-directory: ${{ steps.cfn-dir.outputs.dir }}
+        continue-on-error: true
         run: |
-          cfn-lint **/*.template **/*.yaml **/*.yml **/*.json --format sarif > cfn-lint-results.sarif || true
+          cfn-lint **/*.template **/*.yaml **/*.yml **/*.json > cfn-lint-results.txt 2>&1 || true
+
+          if [ -s cfn-lint-results.txt ]; then
+            echo "has_results=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_results=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Upload cfn-lint results
         if: steps.check-cfn.outputs.has_templates == 'true' && always()
         uses: actions/upload-artifact@v4
         with:
           name: cfn-lint-results
-          path: ${{ steps.cfn-dir.outputs.dir }}/cfn-lint-results.sarif
+          path: ${{ steps.cfn-dir.outputs.dir }}/cfn-lint-results.txt
+
+      - name: Find Pull Request
+        if: always() && steps.check-cfn.outputs.has_templates == 'true' && steps.cfn-lint.outputs.has_results == 'true'
+        uses: jwalton/gh-find-current-pr@v1
+        id: findPr
+
+      - name: Comment PR with cfn-lint Results
+        if: always() && steps.findPr.outputs.pr != '' && steps.cfn-lint.outputs.has_results == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const cfnLintOutput = fs.readFileSync('${{ steps.cfn-dir.outputs.dir }}/cfn-lint-results.txt', 'utf8');
+
+            // Truncate if too long
+            let output = cfnLintOutput;
+            if (output.length > 60000) {
+              output = output.substring(0, 60000) + '\n\n... (output truncated)';
+            }
+
+            const body = `## CloudFormation Linter Results
+
+            <details><summary>View cfn-lint Findings</summary>
+
+            \`\`\`
+            ${output}
+            \`\`\`
+
+            </details>
+
+            **Commit:** ${{ github.sha }}`;
+
+            github.rest.issues.createComment({
+              issue_number: ${{ steps.findPr.outputs.pr }},
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
 
   terraform-validate:
     name: Terraform Validation
