@@ -88,11 +88,12 @@ jobs:
             --output cli \
             --soft-fail \
             --compact \
+            --quiet \
             --framework terraform cloudformation arm kubernetes helm dockerfile secrets \
             > checkov_output.txt 2>&1 || true
 
-          # Check if there are any findings
-          if grep -q "Passed checks:" checkov_output.txt; then
+          # Check if there are any findings (quiet mode shows summary and failures only)
+          if [ -s checkov_output.txt ]; then
             echo "has_results=true" >> $GITHUB_OUTPUT
           else
             echo "has_results=false" >> $GITHUB_OUTPUT
