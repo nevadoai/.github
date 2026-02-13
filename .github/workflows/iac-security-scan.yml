@@ -162,7 +162,6 @@ jobs:
           scan-ref: ${{ inputs.working-directory }}
           format: 'table'
           severity: ${{ inputs.severity }}
-          scanners: 'config,secret'
           exit-code: '0'
 
       - name: Capture Trivy output
@@ -172,7 +171,6 @@ jobs:
           trivy config ${{ inputs.working-directory }} \
             --format table \
             --severity ${{ inputs.severity }} \
-            --scanners config,secret \
             > trivy_output.txt 2>&1 || true
 
           if [ -s trivy_output.txt ]; then
