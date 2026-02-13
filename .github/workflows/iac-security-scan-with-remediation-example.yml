@@ -1,0 +1,261 @@
+name: IaC Security Scan with Auto-Remediation (Example)
+
+# This is an EXAMPLE showing how to integrate the security-remediation workflow
+# with your existing IaC security scans.
+#
+# Key changes from the original iac-security-scan.yml:
+# 1. Checkov and Trivy now output JSON format
+# 2. JSON results are uploaded as artifacts
+# 3. New remediation jobs call the security-remediation workflow
+# 4. Remediation jobs only run on pull_request events (where commits are allowed)
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: 'Working directory for IaC files'
+        required: false
+        type: string
+        default: '.'
+      enable-auto-remediation:
+        description: 'Enable automatic remediation of security findings'
+        required: false
+        type: boolean
+        default: false
+      remediation-dry-run:
+        description: 'Dry run mode - only comment on PR, do not commit fixes'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      anthropic_api_key:
+        description: 'Anthropic API key for AI-powered remediation'
+        required: false
+
+jobs:
+  # ============================================================================
+  # SCANNING JOBS (Modified to output JSON)
+  # ============================================================================
+
+  checkov:
+    name: Checkov - Multi-Cloud IaC Scanner
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Checkov
+        run: pip install checkov
+
+      - name: Run Checkov (CLI output for PR comment)
+        id: checkov-cli
+        working-directory: ${{ inputs.working-directory }}
+        continue-on-error: true
+        run: |
+          checkov --directory . \
+            --output cli \
+            --soft-fail \
+            --compact \
+            --quiet \
+            --framework terraform cloudformation arm kubernetes helm dockerfile secrets \
+            > checkov_output.txt 2>&1 || true
+
+          if [ -s checkov_output.txt ]; then
+            echo "has_results=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_results=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run Checkov (JSON output for remediation)
+        working-directory: ${{ inputs.working-directory }}
+        continue-on-error: true
+        run: |
+          checkov --directory . \
+            --output json \
+            --soft-fail \
+            --compact \
+            --quiet \
+            --framework terraform cloudformation arm kubernetes helm dockerfile secrets \
+            > checkov_results.json 2>&1 || true
+
+      - name: Upload Checkov CLI results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkov-cli-results
+          path: ${{ inputs.working-directory }}/checkov_output.txt
+
+      - name: Upload Checkov JSON results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkov-json-results
+          path: ${{ inputs.working-directory }}/checkov_results.json
+
+      - name: Find Pull Request
+        if: always() && steps.checkov-cli.outputs.has_results == 'true'
+        uses: jwalton/gh-find-current-pr@v1
+        id: findPr
+
+      - name: Comment PR with Checkov Results
+        if: always() && steps.findPr.outputs.pr != '' && steps.checkov-cli.outputs.has_results == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const checkovOutput = fs.readFileSync('${{ inputs.working-directory }}/checkov_output.txt', 'utf8');
+
+            let output = checkovOutput;
+            if (output.length > 60000) {
+              output = output.substring(0, 60000) + '\n\n... (output truncated)';
+            }
+
+            const body = `## Checkov Security Scan Results
+
+            <details><summary>View Checkov Findings</summary>
+
+            \`\`\`
+            ${output}
+            \`\`\`
+
+            </details>
+
+            **Commit:** ${{ github.sha }}`;
+
+            github.rest.issues.createComment({
+              issue_number: ${{ steps.findPr.outputs.pr }},
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+  trivy-iac:
+    name: Trivy IaC Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy IaC scanner (Table output for PR comment)
+        id: trivy-table
+        run: |
+          trivy config ${{ inputs.working-directory }} \
+            --format table \
+            --severity MEDIUM,HIGH,CRITICAL \
+            > trivy_output.txt 2>&1 || true
+
+          if [ -s trivy_output.txt ]; then
+            echo "has_results=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_results=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run Trivy IaC scanner (JSON output for remediation)
+        continue-on-error: true
+        run: |
+          trivy config ${{ inputs.working-directory }} \
+            --format json \
+            --severity MEDIUM,HIGH,CRITICAL \
+            > trivy_results.json 2>&1 || true
+
+      - name: Upload Trivy table results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-table-results
+          path: trivy_output.txt
+
+      - name: Upload Trivy JSON results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-json-results
+          path: trivy_results.json
+
+      - name: Find Pull Request
+        if: always() && steps.trivy-table.outputs.has_results == 'true'
+        uses: jwalton/gh-find-current-pr@v1
+        id: findPr
+
+      - name: Comment PR with Trivy Results
+        if: always() && steps.findPr.outputs.pr != '' && steps.trivy-table.outputs.has_results == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const trivyOutput = fs.readFileSync('trivy_output.txt', 'utf8');
+
+            let output = trivyOutput;
+            if (output.length > 60000) {
+              output = output.substring(0, 60000) + '\n\n... (output truncated)';
+            }
+
+            const body = `## Trivy IaC Security Scan Results
+
+            <details><summary>View Trivy Findings</summary>
+
+            \`\`\`
+            ${output}
+            \`\`\`
+
+            </details>
+
+            **Commit:** ${{ github.sha }}`;
+
+            github.rest.issues.createComment({
+              issue_number: ${{ steps.findPr.outputs.pr }},
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+  # ============================================================================
+  # AUTO-REMEDIATION JOBS (New)
+  # ============================================================================
+
+  remediate-checkov:
+    name: Auto-remediate Checkov Findings
+    needs: checkov
+    if: |
+      inputs.enable-auto-remediation &&
+      github.event_name == 'pull_request'
+    uses: ./.github/workflows/security-remediation.yml
+    with:
+      scanner: checkov
+      results_artifact: checkov-json-results
+      results_file: checkov_results.json
+      dry_run: ${{ inputs.remediation-dry-run }}
+      max_findings: 20
+      model: claude-sonnet-4-20250514
+    secrets:
+      anthropic_api_key: ${{ secrets.anthropic_api_key }}
+
+  remediate-trivy:
+    name: Auto-remediate Trivy IaC Findings
+    needs: trivy-iac
+    if: |
+      inputs.enable-auto-remediation &&
+      github.event_name == 'pull_request'
+    uses: ./.github/workflows/security-remediation.yml
+    with:
+      scanner: trivy-iac
+      results_artifact: trivy-json-results
+      results_file: trivy_results.json
+      dry_run: ${{ inputs.remediation-dry-run }}
+      max_findings: 20
+      model: claude-sonnet-4-20250514
+    secrets:
+      anthropic_api_key: ${{ secrets.anthropic_api_key }}

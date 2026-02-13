@@ -1,0 +1,122 @@
+name: Security Finding Remediation
+
+on:
+  workflow_call:
+    inputs:
+      scanner:
+        description: "Scanner that produced the results (checkov, trivy-iac, trivy-vuln)"
+        required: true
+        type: string
+      results_artifact:
+        description: "Name of the uploaded artifact containing scan results"
+        required: true
+        type: string
+      results_file:
+        description: "Path to results file within the artifact"
+        required: true
+        type: string
+      config_file:
+        description: "Path to remediation config YAML"
+        required: false
+        type: string
+        default: ".github/security-remediation-config.yaml"
+      dry_run:
+        description: "If true, only post a PR comment with proposed fixes, don't commit"
+        required: false
+        type: boolean
+        default: false
+      max_findings:
+        description: "Max number of findings to attempt remediation on"
+        required: false
+        type: number
+        default: 20
+      model:
+        description: "Anthropic model to use"
+        required: false
+        type: string
+        default: "claude-sonnet-4-20250514"
+    secrets:
+      anthropic_api_key:
+        required: true
+
+jobs:
+  remediate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Download scan results
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.results_artifact }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install anthropic pyyaml
+
+      - name: Install scanner for verification
+        run: |
+          case "${{ inputs.scanner }}" in
+            checkov)
+              pip install checkov
+              ;;
+            trivy-iac|trivy-vuln)
+              sudo apt-get install -y wget apt-transport-https gnupg lsb-release
+              wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+              echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
+              sudo apt-get update && sudo apt-get install -y trivy
+              ;;
+          esac
+
+      - name: Run remediation agent
+        id: remediate
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.anthropic_api_key }}
+          SCANNER: ${{ inputs.scanner }}
+          RESULTS_FILE: ${{ inputs.results_file }}
+          CONFIG_FILE: ${{ inputs.config_file }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          MAX_FINDINGS: ${{ inputs.max_findings }}
+          MODEL: ${{ inputs.model }}
+        run: python .github/scripts/security_remediation_agent.py
+
+      - name: Commit fixes
+        if: inputs.dry_run == false && steps.remediate.outputs.fixes_applied > 0
+        run: |
+          git config user.name "security-remediation-bot"
+          git config user.email "security-bot@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(security): auto-remediate ${{ steps.remediate.outputs.fixes_applied }} finding(s)
+
+          Scanner: ${{ inputs.scanner }}
+          Fixes: ${{ steps.remediate.outputs.fixed_ids }}
+          Skips: ${{ steps.remediate.outputs.skipped_ids }}
+
+          Co-authored-by: Claude <noreply@anthropic.com>"
+          git push
+
+      - name: Post PR comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = fs.readFileSync('remediation_summary.md', 'utf8');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: summary
+            });

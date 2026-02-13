@@ -1,0 +1,60 @@
+# Default behavior for checks not listed in any category.
+# Options: "agent_decide" (attempt fix), "human" (flag for review)
+default_action: agent_decide
+
+# Verification settings
+verify_after_fix: true
+max_retry_attempts: 1
+
+# Checks to automatically fix — generally safe, well-understood remediations
+auto_fix:
+  # Checkov - S3
+  - CKV_AWS_18   # S3 access logging
+  - CKV_AWS_19   # S3 default encryption
+  - CKV_AWS_21   # S3 versioning
+  - CKV_AWS_53   # S3 block public ACLs
+  - CKV_AWS_54   # S3 block public policy
+  - CKV_AWS_55   # S3 ignore public ACLs
+  - CKV_AWS_56   # S3 restrict public buckets
+  - CKV2_AWS_6   # S3 public access block
+
+  # Checkov - RDS
+  - CKV_AWS_16   # RDS encryption at rest
+  - CKV_AWS_17   # RDS logging enabled
+  - CKV_AWS_118  # RDS enhanced monitoring
+  - CKV_AWS_133  # RDS auto minor version upgrade
+  - CKV_AWS_145  # RDS encryption at rest (Aurora)
+  - CKV_AWS_162  # RDS IAM authentication
+  - CKV_AWS_226  # RDS deletion protection
+  - CKV_AWS_354  # RDS performance insights
+
+  # Checkov - General
+  - CKV_AWS_260  # Security group no unrestricted ingress to port 22
+  - CKV_AWS_338  # CloudWatch log group retention
+
+  # Trivy IaC
+  - AVD-AWS-0089  # S3 encryption
+  - AVD-AWS-0090  # S3 versioning
+  - AVD-AWS-0132  # RDS encryption
+
+# Checks to skip with a reason (agent adds inline skip annotation)
+auto_skip:
+  CKV_AWS_144: "Cross-region replication not required — single-region architecture"
+  CKV_AWS_241: "Kinesis encryption managed at application layer"
+
+# Checks that require human review — never auto-remediated
+# Typically IAM, security groups, and network config
+require_human:
+  - CKV_AWS_23   # Security group allows open ingress
+  - CKV_AWS_24   # Security group open to SSH
+  - CKV_AWS_26   # SNS topic encryption
+  - CKV_AWS_33   # KMS key rotation
+  - CKV_AWS_40   # IAM policy with wildcard resource
+  - CKV_AWS_49   # IAM policy no full admin
+  - CKV_AWS_61   # IAM policy no * principal
+  - CKV_AWS_109  # IAM no permission management
+  - CKV_AWS_110  # IAM no write without constraint
+  - CKV_AWS_111  # IAM no wildcard resource with write
+
+# Checks to completely ignore (not even reported)
+ignore: []
