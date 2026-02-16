@@ -7,7 +7,7 @@ name: IaC Security Scan with Auto-Remediation (Example)
 # 1. Checkov and Trivy now output JSON format
 # 2. JSON results are uploaded as artifacts
 # 3. New remediation jobs call the security-remediation workflow
-# 4. Remediation jobs only run on pull_request events (where commits are allowed)
+# 4. Remediation jobs run when enable-auto-remediation is true (supports both pull_request and push events)
 
 on:
   workflow_call:
@@ -229,10 +229,8 @@ jobs:
   remediate-checkov:
     name: Auto-remediate Checkov Findings
     needs: checkov
-    if: |
-      inputs.enable-auto-remediation &&
-      github.event_name == 'pull_request'
-    uses: ./.github/workflows/security-remediation.yml
+    if: inputs.enable-auto-remediation
+    uses: nevadoai/.github/.github/workflows/security-remediation.yml@main
     with:
       scanner: checkov
       results_artifact: checkov-json-results
@@ -246,10 +244,8 @@ jobs:
   remediate-trivy:
     name: Auto-remediate Trivy IaC Findings
     needs: trivy-iac
-    if: |
-      inputs.enable-auto-remediation &&
-      github.event_name == 'pull_request'
-    uses: ./.github/workflows/security-remediation.yml
+    if: inputs.enable-auto-remediation
+    uses: nevadoai/.github/.github/workflows/security-remediation.yml@main
     with:
       scanner: trivy-iac
       results_artifact: trivy-json-results
