@@ -230,7 +230,7 @@ jobs:
     name: Auto-remediate Checkov Findings
     needs: checkov
     if: inputs.enable-auto-remediation
-    uses: nevadoai/.github/.github/workflows/security-remediation.yml@main
+    uses: nevadoai/.github/.github/workflows/security-remediation.yml@fix-cross-repo-remediation-workflow
     with:
       scanner: checkov
       results_artifact: checkov-json-results
@@ -245,7 +245,7 @@ jobs:
     name: Auto-remediate Trivy IaC Findings
     needs: trivy-iac
     if: inputs.enable-auto-remediation
-    uses: nevadoai/.github/.github/workflows/security-remediation.yml@main
+    uses: nevadoai/.github/.github/workflows/security-remediation.yml@fix-cross-repo-remediation-workflow
     with:
       scanner: trivy-iac
       results_artifact: trivy-json-results
